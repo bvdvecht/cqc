@@ -67,6 +67,11 @@ impl Client {
         self.build(MsgType::Tp(Tp::Command), Some(req_cmd))
     }
 
+    /// Build a command request.
+    fn factory_command(&self, req_cmd: ReqCmd) -> Request {
+        self.build(MsgType::Tp(Tp::Factory), Some(req_cmd))
+    }
+
     /// Build an identity operation command request.
     #[inline]
     pub fn cmd_i(&self, qubit_id: u16, options: CmdOpt) -> Request {
@@ -109,10 +114,21 @@ impl Client {
         let xtra_hdr = self.xtra_remote_node(remote_id);
         self.command(self.build_req_cmd(qubit_id, Cmd::Epr, options, xtra_hdr))
     }
+    /// Build an EPR creation factory request.
+    #[inline]
+    pub fn fact_epr(&self, qubit_id: u16, options: CmdOpt, remote_id: RemoteId, num_iter: u8, fact_opt: FactoryOpt) -> Request {
+        let xtra_hdr = self.xtra_remote_node(remote_id);
+        self.factory_command(self.build_fact_cmd(qubit_id, Cmd::Epr, options, xtra_hdr, num_iter, fact_opt))
+    }
     /// Build an EPR receive command request.
     #[inline]
     pub fn cmd_epr_recv(&self, qubit_id: u16, options: CmdOpt) -> Request {
         self.command(self.build_req_cmd(qubit_id, Cmd::EprRecv, options, XtraHdr::None))
+    }
+    /// Build an EPR receive factory request.
+    #[inline]
+    pub fn fact_epr_recv(&self, qubit_id: u16, options: CmdOpt, num_iter: u8, fact_opt: FactoryOpt) -> Request {
+        self.factory_command(self.build_fact_cmd(qubit_id, Cmd::EprRecv, options, XtraHdr::None, num_iter, fact_opt))
     }
 
     /// Build a Pauli X command request.
@@ -191,7 +207,31 @@ impl Client {
             options,
         };
 
-        ReqCmd { cmd_hdr, xtra_hdr }
+        ReqCmd { fact_hdr: None, cmd_hdr, xtra_hdr }
+    }
+
+    /// Build a Command Header Request.
+    fn build_fact_cmd (
+        &self,
+        qubit_id: u16,
+        instr: Cmd,
+        options: CmdOpt,
+        xtra_hdr: XtraHdr,
+        num_iter: u8,
+        fact_opt: FactoryOpt
+    ) -> ReqCmd {
+        let cmd_hdr = CmdHdr {
+            qubit_id,
+            instr,
+            options,
+        };
+
+        let fact_hdr = Some(FactoryHdr {
+            num_iter,
+            options: fact_opt
+        });
+
+        ReqCmd { fact_hdr, cmd_hdr, xtra_hdr }
     }
 
     /// Build an Xtra Header that specifies a remote node.

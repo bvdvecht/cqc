@@ -222,13 +222,15 @@ impl Request {
 /// header is required.
 #[derive(Debug, PartialEq)]
 pub struct ReqCmd {
+    pub fact_hdr: Option<FactoryHdr>,
     pub cmd_hdr: CmdHdr,
     pub xtra_hdr: XtraHdr,
 }
 
 impl ReqCmd {
     pub fn len(&self) -> u32 {
-        CmdHdr::hdr_len() + self.xtra_hdr.len()
+        self.fact_hdr.as_ref().map(|hdr| hdr.len()).unwrap_or(0)
+            + CmdHdr::hdr_len() + self.xtra_hdr.len()
     }
 }
 
@@ -302,6 +304,9 @@ impl Serialize for ReqCmd {
         S: Serializer,
     {
         let mut s = serializer.serialize_struct("ReqCmd", 2)?;
+        if self.fact_hdr.is_some() {
+            s.serialize_field("FactoryHdr", self.fact_hdr.as_ref().unwrap())?;
+        }
         s.serialize_field("CmdHdr", &self.cmd_hdr)?;
         match self.xtra_hdr {
             XtraHdr::Rot(ref h) => s.serialize_field("RotHdr", h)?,
@@ -324,7 +329,7 @@ impl<'de> Deserialize<'de> for Request {
         D: Deserializer<'de>,
     {
         const FIELDS: &'static [&'static str] =
-            &["CqcHdr", "CmdHdr", "XtraHdr"];
+            &["CqcHdr", "FactoryHdr", "CmdHdr", "XtraHdr"];
         deserializer.deserialize_struct("Request", FIELDS, RequestVisitor)
     }
 }
@@ -363,8 +368,14 @@ impl<'de> Visitor<'de> for RequestVisitor {
                     &self,
                 ));
             }
+            MsgType::Tp(Tp::GetTime) | MsgType::Tp(Tp::Command)
+            | MsgType::Tp(Tp::Factory) => {
+                let fact_hdr: Option<FactoryHdr> = if msg_type == MsgType::Tp(Tp::Factory) {
+                    Some(de_hdr!(seq))
+                } else {
+                    None
+                };
 
-            MsgType::Tp(Tp::GetTime) | MsgType::Tp(Tp::Command) => {
                 de_check_len!("CmdHdr", length, CmdHdr::hdr_len());
                 let cmd_hdr: CmdHdr = de_hdr!(seq);
 
@@ -388,11 +399,10 @@ impl<'de> Visitor<'de> for RequestVisitor {
                     _ => XtraHdr::None,
                 };
 
-                Some(ReqCmd { cmd_hdr, xtra_hdr })
+                Some(ReqCmd { cmd_hdr, fact_hdr, xtra_hdr })
             }
 
-            MsgType::Tp(Tp::Factory)
-            | MsgType::Tp(Tp::InfTime)
+            MsgType::Tp(Tp::InfTime)
             | MsgType::Tp(Tp::Mix)
             | MsgType::Tp(Tp::If) => {
                 return Err(de::Error::invalid_type(
