@@ -198,14 +198,21 @@ macro_rules! de_hdr {
     };
 }
 
-
-
+/// # Request
+/// 
+/// A valid CQC request will always being with the CQC header.
+/// A request body may follow for certain message types.
 #[derive(Debug, PartialEq)]
 pub struct Request {
     pub cqc_hdr: CqcHdr,
     pub body: Option<RequestBody>
 }
 
+/// # Request Body
+/// 
+/// A request body follows the CQC Header or a Type Header for some messages.
+/// It is either a single command, a factory of commands, 
+/// or a mix of CQC requests each starting with a Type Header.
 #[derive(Debug, PartialEq)]
 pub enum RequestBody {
     Cmd(ReqCmd),
@@ -219,12 +226,21 @@ impl RequestBody {
     }
 }
 
+/// # Typed Request
+/// 
+/// A typed request is similar to a normal request,
+/// but instead of starting with a CQC header, it starts with a Type header.
+/// Typed requests are chained together inside a Mix body.
 #[derive(Debug, PartialEq)]
 pub struct TypedRequest {
     pub type_hdr: TypeHdr,
     pub body: Option<RequestBody>
 }
 
+/// # Mix Body
+/// 
+/// A mix body is the request body of a Mix request.
+/// It consists of a list of typed requests.
 #[derive(Debug, PartialEq)]
 pub struct MixBody {
     pub reqs: Vec<TypedRequest>
@@ -235,18 +251,18 @@ pub struct MixBody {
 ///
 /// A valid CQC request will always begin with the CQC header.  A command
 /// header must follow for certain message types.
-#[derive(Debug, PartialEq)]
-pub struct RequestOld {
-    pub cqc_hdr: CqcHdr,
-    pub req_cmd: Option<ReqCmd>,
-}
+// #[derive(Debug, PartialEq)]
+// pub struct RequestOld {
+//     pub cqc_hdr: CqcHdr,
+//     pub req_cmd: Option<ReqCmd>,
+// }
 
-impl RequestOld {
-    pub fn len(&self) -> u32 {
-        CqcHdr::hdr_len()
-            + self.req_cmd.as_ref().map(|hdr| hdr.len()).unwrap_or(0)
-    }
-}
+// impl RequestOld {
+//     pub fn len(&self) -> u32 {
+//         CqcHdr::hdr_len()
+//             + self.req_cmd.as_ref().map(|hdr| hdr.len()).unwrap_or(0)
+//     }
+// }
 
 /// # Command Request
 ///
@@ -265,6 +281,11 @@ impl ReqCmd {
     }
 }
 
+/// # Factory Command Request
+/// 
+/// A factory command request consists of a factory header followed by a 
+/// command request. The factory header specifies how many time the following
+/// command must be executed.
 #[derive(Debug, PartialEq)]
 pub struct ReqFactCmd {
     pub fact_hdr: FactoryHdr,
@@ -325,20 +346,20 @@ impl XtraHdr {
 // Request serialisation.
 // ----------------------------------------------------------------------------
 
-impl Serialize for RequestOld {
-    #[inline]
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut s = serializer.serialize_struct("RequestOld", 2)?;
-        s.serialize_field("CqcHdr", &self.cqc_hdr)?;
-        if self.req_cmd.is_some() {
-            s.serialize_field("ReqCmd", self.req_cmd.as_ref().unwrap())?;
-        }
-        s.end()
-    }
-}
+// impl Serialize for RequestOld {
+//     #[inline]
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: Serializer,
+//     {
+//         let mut s = serializer.serialize_struct("RequestOld", 2)?;
+//         s.serialize_field("CqcHdr", &self.cqc_hdr)?;
+//         if self.req_cmd.is_some() {
+//             s.serialize_field("ReqCmd", self.req_cmd.as_ref().unwrap())?;
+//         }
+//         s.end()
+//     }
+// }
 
 impl Serialize for Request {
     #[inline]
@@ -414,111 +435,111 @@ impl Serialize for ReqFactCmd {
 // Request deserialisation.
 // ----------------------------------------------------------------------------
 
-impl<'de> Deserialize<'de> for RequestOld {
-    #[inline]
-    fn deserialize<D>(deserializer: D) -> Result<RequestOld, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        const FIELDS: &'static [&'static str] =
-            &["CqcHdr", "FactoryHdr", "CmdHdr", "XtraHdr"];
-        deserializer.deserialize_struct("RequestOld", FIELDS, RequestOldVisitor)
-    }
-}
+// impl<'de> Deserialize<'de> for RequestOld {
+//     #[inline]
+//     fn deserialize<D>(deserializer: D) -> Result<RequestOld, D::Error>
+//     where
+//         D: Deserializer<'de>,
+//     {
+//         const FIELDS: &'static [&'static str] =
+//             &["CqcHdr", "FactoryHdr", "CmdHdr", "XtraHdr"];
+//         deserializer.deserialize_struct("RequestOld", FIELDS, RequestOldVisitor)
+//     }
+// }
 
-struct RequestOldVisitor;
+// struct RequestOldVisitor;
 
-impl<'de> Visitor<'de> for RequestOldVisitor {
-    type Value = RequestOld;
+// impl<'de> Visitor<'de> for RequestOldVisitor {
+//     type Value = RequestOld;
 
-    #[inline]
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a CQC request packet")
-    }
+//     #[inline]
+//     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+//         formatter.write_str("a CQC request packet")
+//     }
 
-    #[inline]
-    fn visit_seq<V>(self, mut seq: V) -> Result<RequestOld, V::Error>
-    where
-        V: SeqAccess<'de>,
-    {
-        let cqc_hdr: CqcHdr = de_hdr!(seq);
-        let (msg_type, length) = (cqc_hdr.msg_type, cqc_hdr.length);
+//     #[inline]
+//     fn visit_seq<V>(self, mut seq: V) -> Result<RequestOld, V::Error>
+//     where
+//         V: SeqAccess<'de>,
+//     {
+//         let cqc_hdr: CqcHdr = de_hdr!(seq);
+//         let (msg_type, length) = (cqc_hdr.msg_type, cqc_hdr.length);
 
-        if length == 0 {
-            return Ok(RequestOld {
-                cqc_hdr,
-                req_cmd: None,
-            });
-        }
+//         if length == 0 {
+//             return Ok(RequestOld {
+//                 cqc_hdr,
+//                 req_cmd: None,
+//             });
+//         }
 
-        let req_cmd = match msg_type {
-            MsgType::Tp(Tp::Hello) => {
-                return Err(de::Error::invalid_type(
-                    de::Unexpected::Other(
-                        "Hello message should not have a message body",
-                    ),
-                    &self,
-                ));
-            }
-            MsgType::Tp(Tp::GetTime) | MsgType::Tp(Tp::Command) => {
-                de_check_len!("CmdHdr", length, CmdHdr::hdr_len());
-                let cmd_hdr: CmdHdr = de_hdr!(seq);
+//         let req_cmd = match msg_type {
+//             MsgType::Tp(Tp::Hello) => {
+//                 return Err(de::Error::invalid_type(
+//                     de::Unexpected::Other(
+//                         "Hello message should not have a message body",
+//                     ),
+//                     &self,
+//                 ));
+//             }
+//             MsgType::Tp(Tp::GetTime) | MsgType::Tp(Tp::Command) => {
+//                 de_check_len!("CmdHdr", length, CmdHdr::hdr_len());
+//                 let cmd_hdr: CmdHdr = de_hdr!(seq);
 
-                let length = length - CmdHdr::hdr_len();
-                let xtra_hdr = match cmd_hdr.instr {
-                    Cmd::RotX | Cmd::RotY | Cmd::RotZ => {
-                        de_check_len!("RotHdr", length, RotHdr::hdr_len());
-                        XtraHdr::Rot(de_hdr!(seq))
-                    }
+//                 let length = length - CmdHdr::hdr_len();
+//                 let xtra_hdr = match cmd_hdr.instr {
+//                     Cmd::RotX | Cmd::RotY | Cmd::RotZ => {
+//                         de_check_len!("RotHdr", length, RotHdr::hdr_len());
+//                         XtraHdr::Rot(de_hdr!(seq))
+//                     }
 
-                    Cmd::Cnot | Cmd::Cphase => {
-                        de_check_len!("QubitHdr", length, QubitHdr::hdr_len());
-                        XtraHdr::Qubit(de_hdr!(seq))
-                    }
+//                     Cmd::Cnot | Cmd::Cphase => {
+//                         de_check_len!("QubitHdr", length, QubitHdr::hdr_len());
+//                         XtraHdr::Qubit(de_hdr!(seq))
+//                     }
 
-                    Cmd::Send | Cmd::Epr => {
-                        de_check_len!("CommHdr", length, CommHdr::hdr_len());
-                        XtraHdr::Comm(de_hdr!(seq))
-                    }
+//                     Cmd::Send | Cmd::Epr => {
+//                         de_check_len!("CommHdr", length, CommHdr::hdr_len());
+//                         XtraHdr::Comm(de_hdr!(seq))
+//                     }
 
-                    _ => XtraHdr::None,
-                };
+//                     _ => XtraHdr::None,
+//                 };
 
-                Some(ReqCmd { cmd_hdr, xtra_hdr })
-            }
+//                 Some(ReqCmd { cmd_hdr, xtra_hdr })
+//             }
 
-            MsgType::Tp(Tp::InfTime)
-            | MsgType::Tp(Tp::Mix)
-            | MsgType::Tp(Tp::If) => {
-                return Err(de::Error::invalid_type(
-                    de::Unexpected::Other(
-                        &vec![
-                            "Deserialise not yet supported for:".to_string(),
-                            msg_type.to_string(),
-                        ]
-                        .join(" "),
-                    ),
-                    &self,
-                ));
-            }
+//             MsgType::Tp(Tp::InfTime)
+//             | MsgType::Tp(Tp::Mix)
+//             | MsgType::Tp(Tp::If) => {
+//                 return Err(de::Error::invalid_type(
+//                     de::Unexpected::Other(
+//                         &vec![
+//                             "Deserialise not yet supported for:".to_string(),
+//                             msg_type.to_string(),
+//                         ]
+//                         .join(" "),
+//                     ),
+//                     &self,
+//                 ));
+//             }
 
-            _ => {
-                return Err(de::Error::invalid_type(
-                    de::Unexpected::Other(
-                        &vec![
-                            "Unexpected message type:".to_string(),
-                            msg_type.to_string(),
-                        ]
-                        .join(" "),
-                    ),
-                    &self,
-                ));
-            }
-        };
+//             _ => {
+//                 return Err(de::Error::invalid_type(
+//                     de::Unexpected::Other(
+//                         &vec![
+//                             "Unexpected message type:".to_string(),
+//                             msg_type.to_string(),
+//                         ]
+//                         .join(" "),
+//                     ),
+//                     &self,
+//                 ));
+//             }
+//         };
 
-        Ok(RequestOld { cqc_hdr, req_cmd })
-    }
-}
+//         Ok(RequestOld { cqc_hdr, req_cmd })
+//     }
+// }
 
 
 

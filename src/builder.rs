@@ -69,10 +69,10 @@ impl Client {
         self.build(MsgType::Tp(Tp::Command), Some(req_cmd))
     }
 
-    /// Build a command request.
-    fn factory_command(&self, req_cmd: ReqFactCmd) -> Request {
-        let req_fact_cmd = RequestBody::FactCmd(req_cmd);
-        self.build(MsgType::Tp(Tp::Factory), Some(req_fact_cmd))
+    /// Build a factory command request.
+    fn factory_command(&self, fact_cmd: ReqFactCmd) -> Request {
+        let fact_cmd = RequestBody::FactCmd(fact_cmd);
+        self.build(MsgType::Tp(Tp::Factory), Some(fact_cmd))
     }
 
     /// Build an identity operation command request.
