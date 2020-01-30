@@ -11,7 +11,7 @@
 //! documentation available in the `hdr` module.
 
 use hdr::*;
-use {ReqCmd, Request, XtraHdr, RspInfo, Response, EprInfo};
+use {ReqCmd, ReqFactCmd, Request, RequestBody, XtraHdr, RspInfo, Response, EprInfo};
 
 /// Struct containing all the necessary bits of information to identify a
 /// remote instance of the CQC backend.
@@ -35,18 +35,18 @@ impl Client {
     }
 
     /// Build a basic CQC request.
-    fn build(&self, msg_type: MsgType, req_cmd: Option<ReqCmd>) -> Request {
+    fn build(&self, msg_type: MsgType, body: Option<RequestBody>) -> Request {
         let cqc_hdr = CqcHdr {
             version: Version::V2,
             msg_type: msg_type,
             app_id: self.app_id,
-            length: match req_cmd {
+            length: match body {
                 Some(ref req) => req.len(),
                 None => 0,
             },
         };
 
-        Request { cqc_hdr, req_cmd }
+        Request { cqc_hdr, body }
     }
 
     /// Build a liveness check request.
@@ -59,17 +59,20 @@ impl Client {
     #[inline]
     pub fn get_time(&self, qubit_id: u16) -> Request {
         let req_cmd = self.build_req_cmd(qubit_id, Cmd::I, CmdOpt::empty(), XtraHdr::None);
+        let req_cmd = RequestBody::Cmd(req_cmd);
         self.build(MsgType::Tp(Tp::GetTime), Some(req_cmd))
     }
 
     /// Build a command request.
     fn command(&self, req_cmd: ReqCmd) -> Request {
+        let req_cmd = RequestBody::Cmd(req_cmd);
         self.build(MsgType::Tp(Tp::Command), Some(req_cmd))
     }
 
     /// Build a command request.
-    fn factory_command(&self, req_cmd: ReqCmd) -> Request {
-        self.build(MsgType::Tp(Tp::Factory), Some(req_cmd))
+    fn factory_command(&self, req_cmd: ReqFactCmd) -> Request {
+        let req_fact_cmd = RequestBody::FactCmd(req_cmd);
+        self.build(MsgType::Tp(Tp::Factory), Some(req_fact_cmd))
     }
 
     /// Build an identity operation command request.
@@ -118,7 +121,8 @@ impl Client {
     #[inline]
     pub fn fact_epr(&self, qubit_id: u16, options: CmdOpt, remote_id: RemoteId, num_iter: u8, fact_opt: FactoryOpt) -> Request {
         let xtra_hdr = self.xtra_remote_node(remote_id);
-        self.factory_command(self.build_fact_cmd(qubit_id, Cmd::Epr, options, xtra_hdr, num_iter, fact_opt))
+        let cmd = self.build_req_cmd(qubit_id, Cmd::Epr, options, xtra_hdr);
+        self.factory_command(self.build_fact_cmd(cmd, num_iter, fact_opt))
     }
     /// Build an EPR receive command request.
     #[inline]
@@ -128,7 +132,8 @@ impl Client {
     /// Build an EPR receive factory request.
     #[inline]
     pub fn fact_epr_recv(&self, qubit_id: u16, options: CmdOpt, num_iter: u8, fact_opt: FactoryOpt) -> Request {
-        self.factory_command(self.build_fact_cmd(qubit_id, Cmd::EprRecv, options, XtraHdr::None, num_iter, fact_opt))
+        let cmd = self.build_req_cmd(qubit_id, Cmd::EprRecv, options, XtraHdr::None);
+        self.factory_command(self.build_fact_cmd(cmd, num_iter, fact_opt))
     }
 
     /// Build a Pauli X command request.
@@ -207,31 +212,22 @@ impl Client {
             options,
         };
 
-        ReqCmd { fact_hdr: None, cmd_hdr, xtra_hdr }
+        ReqCmd { cmd_hdr, xtra_hdr }
     }
 
     /// Build a Command Header Request.
     fn build_fact_cmd (
         &self,
-        qubit_id: u16,
-        instr: Cmd,
-        options: CmdOpt,
-        xtra_hdr: XtraHdr,
+        req_cmd: ReqCmd,
         num_iter: u8,
         fact_opt: FactoryOpt
-    ) -> ReqCmd {
-        let cmd_hdr = CmdHdr {
-            qubit_id,
-            instr,
-            options,
-        };
-
-        let fact_hdr = Some(FactoryHdr {
+    ) -> ReqFactCmd {
+        let fact_hdr = FactoryHdr {
             num_iter,
             options: fact_opt
-        });
+        };
 
-        ReqCmd { fact_hdr, cmd_hdr, xtra_hdr }
+        ReqFactCmd { fact_hdr, req_cmd }
     }
 
     /// Build an Xtra Header that specifies a remote node.

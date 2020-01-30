@@ -198,17 +198,50 @@ macro_rules! de_hdr {
     };
 }
 
+
+
+#[derive(Debug, PartialEq)]
+pub struct Request {
+    pub cqc_hdr: CqcHdr,
+    pub body: Option<RequestBody>
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RequestBody {
+    Cmd(ReqCmd),
+    FactCmd(ReqFactCmd),
+    Mix(MixBody)
+}
+
+impl RequestBody {
+    fn len(&self) -> u32 {
+        0 // TODO
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct TypedRequest {
+    pub type_hdr: TypeHdr,
+    pub body: Option<RequestBody>
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MixBody {
+    pub reqs: Vec<TypedRequest>
+}
+
+
 /// # Request
 ///
 /// A valid CQC request will always begin with the CQC header.  A command
 /// header must follow for certain message types.
 #[derive(Debug, PartialEq)]
-pub struct Request {
+pub struct RequestOld {
     pub cqc_hdr: CqcHdr,
     pub req_cmd: Option<ReqCmd>,
 }
 
-impl Request {
+impl RequestOld {
     pub fn len(&self) -> u32 {
         CqcHdr::hdr_len()
             + self.req_cmd.as_ref().map(|hdr| hdr.len()).unwrap_or(0)
@@ -222,15 +255,25 @@ impl Request {
 /// header is required.
 #[derive(Debug, PartialEq)]
 pub struct ReqCmd {
-    pub fact_hdr: Option<FactoryHdr>,
     pub cmd_hdr: CmdHdr,
     pub xtra_hdr: XtraHdr,
 }
 
 impl ReqCmd {
     pub fn len(&self) -> u32 {
-        self.fact_hdr.as_ref().map(|hdr| hdr.len()).unwrap_or(0)
-            + CmdHdr::hdr_len() + self.xtra_hdr.len()
+        CmdHdr::hdr_len() + self.xtra_hdr.len()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ReqFactCmd {
+    pub fact_hdr: FactoryHdr,
+    pub req_cmd: ReqCmd
+}
+
+impl ReqFactCmd {
+    pub fn len(&self) -> u32 {
+        FactoryHdr::hdr_len() + self.req_cmd.len()
     }
 }
 
@@ -282,13 +325,13 @@ impl XtraHdr {
 // Request serialisation.
 // ----------------------------------------------------------------------------
 
-impl Serialize for Request {
+impl Serialize for RequestOld {
     #[inline]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut s = serializer.serialize_struct("Request", 2)?;
+        let mut s = serializer.serialize_struct("RequestOld", 2)?;
         s.serialize_field("CqcHdr", &self.cqc_hdr)?;
         if self.req_cmd.is_some() {
             s.serialize_field("ReqCmd", self.req_cmd.as_ref().unwrap())?;
@@ -297,6 +340,45 @@ impl Serialize for Request {
     }
 }
 
+impl Serialize for Request {
+    #[inline]
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("Request", 2)?;
+        s.serialize_field("cqc_hdr", &self.cqc_hdr)?;
+        if let Some(body) = &self.body {
+            match body {
+                RequestBody::Cmd(b) => s.serialize_field("body", b)?,
+                RequestBody::FactCmd(b) => s.serialize_field("body", b)?,
+                _ => () // TODO: Mix
+            };
+        }
+        s.end()
+    }
+}
+
+impl Serialize for TypedRequest {
+    #[inline]
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("TypedRequest", 2)?;
+        s.serialize_field("type_hdr", &self.type_hdr)?;
+        if let Some(body) = &self.body {
+            match body {
+                RequestBody::Cmd(b) => s.serialize_field("body", b)?,
+                RequestBody::FactCmd(b) => s.serialize_field("body", b)?,
+                _ => () // TODO: Mix
+            };
+        }
+        s.end()
+    }
+}
+
+
 impl Serialize for ReqCmd {
     #[inline]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -304,9 +386,6 @@ impl Serialize for ReqCmd {
         S: Serializer,
     {
         let mut s = serializer.serialize_struct("ReqCmd", 2)?;
-        if self.fact_hdr.is_some() {
-            s.serialize_field("FactoryHdr", self.fact_hdr.as_ref().unwrap())?;
-        }
         s.serialize_field("CmdHdr", &self.cmd_hdr)?;
         match self.xtra_hdr {
             XtraHdr::Rot(ref h) => s.serialize_field("RotHdr", h)?,
@@ -318,26 +397,39 @@ impl Serialize for ReqCmd {
     }
 }
 
+impl Serialize for ReqFactCmd {
+    #[inline]
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("ReqCmd", 2)?;
+        s.serialize_field("fact_hdr", &self.fact_hdr)?;
+        s.serialize_field("req_cmd", &self.req_cmd)?;
+        s.end()
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Request deserialisation.
 // ----------------------------------------------------------------------------
 
-impl<'de> Deserialize<'de> for Request {
+impl<'de> Deserialize<'de> for RequestOld {
     #[inline]
-    fn deserialize<D>(deserializer: D) -> Result<Request, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<RequestOld, D::Error>
     where
         D: Deserializer<'de>,
     {
         const FIELDS: &'static [&'static str] =
             &["CqcHdr", "FactoryHdr", "CmdHdr", "XtraHdr"];
-        deserializer.deserialize_struct("Request", FIELDS, RequestVisitor)
+        deserializer.deserialize_struct("RequestOld", FIELDS, RequestOldVisitor)
     }
 }
 
-struct RequestVisitor;
+struct RequestOldVisitor;
 
-impl<'de> Visitor<'de> for RequestVisitor {
-    type Value = Request;
+impl<'de> Visitor<'de> for RequestOldVisitor {
+    type Value = RequestOld;
 
     #[inline]
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -345,7 +437,7 @@ impl<'de> Visitor<'de> for RequestVisitor {
     }
 
     #[inline]
-    fn visit_seq<V>(self, mut seq: V) -> Result<Request, V::Error>
+    fn visit_seq<V>(self, mut seq: V) -> Result<RequestOld, V::Error>
     where
         V: SeqAccess<'de>,
     {
@@ -353,7 +445,7 @@ impl<'de> Visitor<'de> for RequestVisitor {
         let (msg_type, length) = (cqc_hdr.msg_type, cqc_hdr.length);
 
         if length == 0 {
-            return Ok(Request {
+            return Ok(RequestOld {
                 cqc_hdr,
                 req_cmd: None,
             });
@@ -368,14 +460,7 @@ impl<'de> Visitor<'de> for RequestVisitor {
                     &self,
                 ));
             }
-            MsgType::Tp(Tp::GetTime) | MsgType::Tp(Tp::Command)
-            | MsgType::Tp(Tp::Factory) => {
-                let fact_hdr: Option<FactoryHdr> = if msg_type == MsgType::Tp(Tp::Factory) {
-                    Some(de_hdr!(seq))
-                } else {
-                    None
-                };
-
+            MsgType::Tp(Tp::GetTime) | MsgType::Tp(Tp::Command) => {
                 de_check_len!("CmdHdr", length, CmdHdr::hdr_len());
                 let cmd_hdr: CmdHdr = de_hdr!(seq);
 
@@ -399,7 +484,7 @@ impl<'de> Visitor<'de> for RequestVisitor {
                     _ => XtraHdr::None,
                 };
 
-                Some(ReqCmd { cmd_hdr, fact_hdr, xtra_hdr })
+                Some(ReqCmd { cmd_hdr, xtra_hdr })
             }
 
             MsgType::Tp(Tp::InfTime)
@@ -431,9 +516,252 @@ impl<'de> Visitor<'de> for RequestVisitor {
             }
         };
 
-        Ok(Request { cqc_hdr, req_cmd })
+        Ok(RequestOld { cqc_hdr, req_cmd })
     }
 }
+
+
+
+impl<'de> Deserialize<'de> for Request {
+    #[inline]
+    fn deserialize<D>(deserializer: D) -> Result<Request, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const FIELDS: &'static [&'static str] =
+            &["cqc_hdr", "body"];
+        deserializer.deserialize_struct("Request", FIELDS, RequestVisitor)
+    }
+}
+
+struct RequestVisitor;
+
+impl<'de> Visitor<'de> for RequestVisitor {
+    type Value = Request;
+
+    #[inline]
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a CQC request packet")
+    }
+
+    #[inline]
+    fn visit_seq<V>(self, mut seq: V) -> Result<Request, V::Error>
+    where
+        V: SeqAccess<'de>,
+    {
+        let cqc_hdr: CqcHdr = de_hdr!(seq);
+        let (msg_type, length) = (cqc_hdr.msg_type, cqc_hdr.length);
+
+        if length == 0 {
+            return Ok(Request {
+                cqc_hdr,
+                body: None,
+            });
+        }
+
+        match msg_type {
+            MsgType::Tp(Tp::Hello) => {
+                return Err(de::Error::invalid_type(
+                    de::Unexpected::Other(
+                        "Hello message should not have a message body",
+                    ),
+                    &self,
+                ));
+            },
+            MsgType::Tp(Tp::Factory) => {
+                let fact_cmd: ReqFactCmd = de_hdr!(seq);
+                let body = Some(RequestBody::FactCmd(fact_cmd));
+                return Ok(Request { cqc_hdr, body } )
+            },
+            MsgType::Tp(Tp::Command) | MsgType::Tp(Tp::GetTime) => {
+                let cmd: ReqCmd = de_hdr!(seq);
+                let body = Some(RequestBody::Cmd(cmd));
+                return Ok(Request { cqc_hdr, body } )
+            },
+            MsgType::Tp(Tp::Mix) => {
+                let req: TypedRequest = de_hdr!(seq);
+                let mix_body = MixBody { reqs: vec![req] };
+                let body = Some(RequestBody::Mix(mix_body));
+                return Ok(Request { cqc_hdr, body } )
+            }
+            _ => {
+                return Err(de::Error::invalid_type(
+                    de::Unexpected::Other(
+                        &vec![
+                            "Deserialise not yet supported for:".to_string(),
+                            msg_type.to_string(),
+                        ]
+                        .join(" "),
+                    ),
+                    &self,
+                ));
+            }
+        }
+
+    }
+}
+
+
+
+impl<'de> Deserialize<'de> for TypedRequest {
+    #[inline]
+    fn deserialize<D>(deserializer: D) -> Result<TypedRequest, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const FIELDS: &'static [&'static str] =
+            &["type_hdr", "body"];
+        deserializer.deserialize_struct("TypedRequest", FIELDS, TypedRequestVisitor)
+    }
+}
+
+struct TypedRequestVisitor;
+
+impl<'de> Visitor<'de> for TypedRequestVisitor {
+    type Value = TypedRequest;
+
+    #[inline]
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a CQC request packet")
+    }
+
+    #[inline]
+    fn visit_seq<V>(self, mut seq: V) -> Result<TypedRequest, V::Error>
+    where
+        V: SeqAccess<'de>,
+    {
+        let type_hdr: TypeHdr = de_hdr!(seq);
+        let (msg_type, length) = (type_hdr.hdr_type, type_hdr.length);
+
+        if length == 0 {
+            return Ok(TypedRequest {
+                type_hdr,
+                body: None,
+            });
+        }
+
+        match msg_type {
+            Tp::Hello => {
+                return Err(de::Error::invalid_type(
+                    de::Unexpected::Other(
+                        "Hello message should not have a message body",
+                    ),
+                    &self,
+                ));
+            },
+            Tp::Factory => {
+                let fact_cmd: ReqFactCmd = de_hdr!(seq);
+                let body = Some(RequestBody::FactCmd(fact_cmd));
+                return Ok(TypedRequest { type_hdr, body } )
+            },
+            Tp::Command | Tp::GetTime => {
+                let cmd: ReqCmd = de_hdr!(seq);
+                let body = Some(RequestBody::Cmd(cmd));
+                return Ok(TypedRequest { type_hdr, body } )
+            },
+            _ => {
+                return Err(de::Error::invalid_type(
+                    de::Unexpected::Other(
+                        &vec![
+                            "Deserialise not yet supported for:".to_string(),
+                            msg_type.to_string(),
+                        ]
+                        .join(" "),
+                    ),
+                    &self,
+                ));
+            }
+        }
+
+    }
+}
+
+impl<'de> Deserialize<'de> for ReqCmd {
+    #[inline]
+    fn deserialize<D>(deserializer: D) -> Result<ReqCmd, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const FIELDS: &'static [&'static str] =
+            &["cqc_hdr", "body"];
+        deserializer.deserialize_struct("ReqCmd", FIELDS, ReqCmdVisitor)
+    }
+}
+
+struct ReqCmdVisitor;
+
+impl<'de> Visitor<'de> for ReqCmdVisitor {
+    type Value = ReqCmd;
+
+    #[inline]
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a CQC request packet")
+    }
+
+    #[inline]
+    fn visit_seq<V>(self, mut seq: V) -> Result<ReqCmd, V::Error>
+    where
+        V: SeqAccess<'de>,
+    {
+        let cmd_hdr: CmdHdr = de_hdr!(seq);
+        let instr = cmd_hdr.instr;
+
+
+        match instr {
+            Cmd::I => {
+                return Ok(ReqCmd { cmd_hdr, xtra_hdr: XtraHdr::None } )
+            },
+            _ => {
+                return Err(de::Error::invalid_type(
+                    de::Unexpected::Other(
+                        &vec![
+                            "Deserialise not yet supported for:".to_string(),
+                            format!("{:?}", instr).to_string(),
+                        ]
+                        .join(" "),
+                    ),
+                    &self,
+                ));
+            }
+        }
+
+    }
+}
+
+impl<'de> Deserialize<'de> for ReqFactCmd {
+    #[inline]
+    fn deserialize<D>(deserializer: D) -> Result<ReqFactCmd, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const FIELDS: &'static [&'static str] =
+            &["cqc_hdr", "body"];
+        deserializer.deserialize_struct("ReqFactCmd", FIELDS, ReqFactCmdVisitor)
+    }
+}
+
+struct ReqFactCmdVisitor;
+
+impl<'de> Visitor<'de> for ReqFactCmdVisitor {
+    type Value = ReqFactCmd;
+
+    #[inline]
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a CQC request packet")
+    }
+
+    #[inline]
+    fn visit_seq<V>(self, mut seq: V) -> Result<ReqFactCmd, V::Error>
+    where
+        V: SeqAccess<'de>,
+    {
+        let fact_hdr: FactoryHdr = de_hdr!(seq);
+        let req_cmd: ReqCmd = de_hdr!(seq);
+
+        Ok(ReqFactCmd { fact_hdr, req_cmd } )
+    }
+}
+
 
 /// # Response
 ///
