@@ -106,6 +106,138 @@ mod request {
         assert_eq!(decoded, request);
     }
 
+    // Encode a packet that has a Factory header, a CMD header, but no XTRA header.
+    #[test]
+    fn fact_cmd_hdr() {
+        let client = Client::new(APP_ID);
+        let request = client
+            .fact_new(QUBIT_ID, *CmdOpt::empty().set_notify().set_block(),
+            5, FactoryOpt::empty());
+
+        // Buffer to write into.
+        let buf_len: usize = request.len() as usize;
+        let mut buffer = vec![0xAA; buf_len];
+
+        // Expected values
+        let msg_type = MsgType::Tp(Tp::Factory);
+        let length = FactoryHdr::hdr_len() + CmdHdr::hdr_len();
+        let instr = Cmd::New;
+        let options = *CmdOpt::empty().set_notify().set_block();
+        let num_iter = 5;
+        let fact_options = FactoryOpt::empty();
+
+        // Big-endian
+        let expected: Vec<u8> = vec![
+            // CQC header
+            Version::V2 as u8,
+            From::from(msg_type),
+            get_byte_16!(APP_ID, 0),
+            get_byte_16!(APP_ID, 1),
+            get_byte_32!(length, 0),
+            get_byte_32!(length, 1),
+            get_byte_32!(length, 2),
+            get_byte_32!(length, 3),
+            // Factory header
+            num_iter as u8,
+            fact_options.bits(),
+            // CMD header
+            get_byte_16!(QUBIT_ID, 0),
+            get_byte_16!(QUBIT_ID, 1),
+            instr as u8,
+            options.bits(),
+        ];
+
+        let encoder = Encoder::new();
+        encoder.encode(&request, &mut buffer[..]);
+        assert_eq!(buffer, expected);
+
+        let decoder = Decoder::new();
+        let decoded: Request = decoder.decode(&buffer[..]).unwrap();
+        assert_eq!(decoded, request);
+    }
+
+    // Encode a packet of type Mix
+    #[test]
+    fn mix_hdr() {
+        let client = Client::new(APP_ID);
+        let request1 = client
+            .fact_new(QUBIT_ID, *CmdOpt::empty().set_notify().set_block(),
+            5, FactoryOpt::empty());
+
+        let request2 = client
+            .fact_new(QUBIT_ID, *CmdOpt::empty().set_notify().set_block(),
+            5, FactoryOpt::empty());
+
+        let request = client.mix(vec![request1, request2]);
+
+        // Buffer to write into.
+        let buf_len: usize = request.len() as usize;
+        let mut buffer = vec![0xAA; buf_len];
+
+        // Expected values
+        let msg_type = MsgType::Tp(Tp::Mix);
+        let type1 = MsgType::Tp(Tp::Factory);
+        let type2 = MsgType::Tp(Tp::Factory);
+        let length1 = FactoryHdr::hdr_len() + CmdHdr::hdr_len();
+        let length2 = FactoryHdr::hdr_len() + CmdHdr::hdr_len();
+        let total_length = 2 * TypeHdr::hdr_len() + length1 + length2;
+        let instr1 = Cmd::New;
+        let instr2 = Cmd::New;
+        let options1 = *CmdOpt::empty().set_notify().set_block();
+        let options2 = *CmdOpt::empty().set_notify().set_block();
+        let num_iter1 = 5;
+        let num_iter2 = 5;
+        let fact_options1 = FactoryOpt::empty();
+        let fact_options2 = FactoryOpt::empty();
+
+        // Big-endian
+        let expected: Vec<u8> = vec![
+            // CQC header
+            Version::V2 as u8,
+            From::from(msg_type),
+            get_byte_16!(APP_ID, 0),
+            get_byte_16!(APP_ID, 1),
+            get_byte_32!(total_length, 0),
+            get_byte_32!(total_length, 1),
+            get_byte_32!(total_length, 2),
+            get_byte_32!(total_length, 3),
+            // Type header 1
+            From::from(type1),
+            get_byte_32!(length1, 0),
+            get_byte_32!(length1, 1),
+            get_byte_32!(length1, 2),
+            get_byte_32!(length1, 3),
+            // Factory header 1
+            num_iter1 as u8,
+            fact_options1.bits(),
+            // CMD header 1
+            get_byte_16!(QUBIT_ID, 0),
+            get_byte_16!(QUBIT_ID, 1),
+            instr1 as u8,
+            options1.bits(),
+            // Type header 2
+            From::from(type2),
+            get_byte_32!(length2, 0),
+            get_byte_32!(length2, 1),
+            get_byte_32!(length2, 2),
+            get_byte_32!(length2, 3),
+            // Factory header 1
+            num_iter2 as u8,
+            fact_options2.bits(),
+            // CMD header 1
+            get_byte_16!(QUBIT_ID, 0),
+            get_byte_16!(QUBIT_ID, 1),
+            instr2 as u8,
+            options2.bits(),
+        ];
+
+        let encoder = Encoder::new();
+        encoder.encode(&request, &mut buffer[..]);
+        assert_eq!(buffer, expected);
+
+        // don't test deserialize as it is currently not implemented
+    }
+
     // Encode a packet with a CMD and ROT headers.
     #[test]
     fn rot_hdr() {

@@ -11,7 +11,7 @@
 //! documentation available in the `hdr` module.
 
 use hdr::*;
-use {ReqCmd, ReqFactCmd, Request, RequestBody, XtraHdr, RspInfo, Response, EprInfo};
+use {ReqCmd, ReqFactCmd, Request, RequestBody, TypedRequest, MixBody, XtraHdr, RspInfo, Response, EprInfo};
 
 /// Struct containing all the necessary bits of information to identify a
 /// remote instance of the CQC backend.
@@ -85,6 +85,25 @@ impl Client {
     pub fn cmd_new(&self, qubit_id: u16, options: CmdOpt) -> Request {
         self.command(self.build_req_cmd(qubit_id, Cmd::New, options, XtraHdr::None))
     }
+    /// Build a qubit creation factory request.
+    #[inline]
+    pub fn fact_new(&self, qubit_id: u16, options: CmdOpt, num_iter: u8, fact_opt: FactoryOpt) -> Request {
+        let cmd = self.build_req_cmd(qubit_id, Cmd::New, options, XtraHdr::None);
+        self.factory_command(self.build_fact_cmd(cmd, num_iter, fact_opt))
+    }
+
+    #[inline]
+    pub fn mix(&self, requests: Vec<Request>) -> Request {
+        let mut typed_requests = Vec::new();
+        for req in requests {
+            typed_requests.push(TypedRequest::from(req));
+        }
+
+        let mix_body = self.build_mix_body(typed_requests);
+        let mix_body = RequestBody::Mix(mix_body);
+        self.build(MsgType::Tp(Tp::Mix), Some(mix_body))
+    }
+
     /// Build a measurement command request.
     #[inline]
     pub fn cmd_measure(&self, qubit_id: u16, options: CmdOpt) -> Request {
@@ -199,13 +218,8 @@ impl Client {
     }
 
     /// Build a Command Header Request.
-    fn build_req_cmd(
-        &self,
-        qubit_id: u16,
-        instr: Cmd,
-        options: CmdOpt,
-        xtra_hdr: XtraHdr,
-    ) -> ReqCmd {
+    fn build_req_cmd(&self, qubit_id: u16, instr: Cmd, options: CmdOpt, 
+        xtra_hdr: XtraHdr) -> ReqCmd {
         let cmd_hdr = CmdHdr {
             qubit_id,
             instr,
@@ -216,18 +230,18 @@ impl Client {
     }
 
     /// Build a Command Header Request.
-    fn build_fact_cmd (
-        &self,
-        req_cmd: ReqCmd,
-        num_iter: u8,
-        fact_opt: FactoryOpt
-    ) -> ReqFactCmd {
+    fn build_fact_cmd (&self, req_cmd: ReqCmd, num_iter: u8, fact_opt: FactoryOpt)
+    -> ReqFactCmd {
         let fact_hdr = FactoryHdr {
             num_iter,
             options: fact_opt
         };
 
         ReqFactCmd { fact_hdr, req_cmd }
+    }
+
+    fn build_mix_body(&self, reqs: Vec<TypedRequest>) -> MixBody {
+        MixBody { reqs }
     }
 
     /// Build an Xtra Header that specifies a remote node.

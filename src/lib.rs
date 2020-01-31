@@ -222,7 +222,11 @@ pub enum RequestBody {
 
 impl RequestBody {
     fn len(&self) -> u32 {
-        0 // TODO
+        match self {
+            Self::Cmd(b) => b.len(),
+            Self::FactCmd(b) => b.len(),
+            Self::Mix(b) => b.len()
+        }
     }
 }
 
@@ -237,6 +241,26 @@ pub struct TypedRequest {
     pub body: Option<RequestBody>
 }
 
+impl TypedRequest {
+    pub fn len(&self) -> u32 {
+        TypeHdr::hdr_len() + self.type_hdr.length
+    }
+
+    pub fn from(req: Request) -> TypedRequest {
+        let hdr_type: Tp = match req.cqc_hdr.msg_type {
+            MsgType::Err(_) => panic!("Trying to convert error message into mixed request."),
+            MsgType::Tp(tp) => tp
+        };
+
+        let type_hdr = TypeHdr {
+            hdr_type: hdr_type,
+            length: req.cqc_hdr.length
+        };
+
+        TypedRequest { type_hdr, body: req.body }
+    }
+}
+
 /// # Mix Body
 /// 
 /// A mix body is the request body of a Mix request.
@@ -246,23 +270,19 @@ pub struct MixBody {
     pub reqs: Vec<TypedRequest>
 }
 
+impl MixBody {
+    pub fn len(&self) -> u32 {
+        self.reqs.iter().map(|req| req.len()).sum()
+    }
+}
 
-/// # Request
-///
-/// A valid CQC request will always begin with the CQC header.  A command
-/// header must follow for certain message types.
-// #[derive(Debug, PartialEq)]
-// pub struct RequestOld {
-//     pub cqc_hdr: CqcHdr,
-//     pub req_cmd: Option<ReqCmd>,
-// }
 
-// impl RequestOld {
-//     pub fn len(&self) -> u32 {
-//         CqcHdr::hdr_len()
-//             + self.req_cmd.as_ref().map(|hdr| hdr.len()).unwrap_or(0)
-//     }
-// }
+impl Request {
+    pub fn len(&self) -> u32 {
+        CqcHdr::hdr_len()
+            + self.body.as_ref().map(|body| body.len()).unwrap_or(0)
+    }
+}
 
 /// # Command Request
 ///
@@ -346,20 +366,6 @@ impl XtraHdr {
 // Request serialisation.
 // ----------------------------------------------------------------------------
 
-// impl Serialize for RequestOld {
-//     #[inline]
-//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: Serializer,
-//     {
-//         let mut s = serializer.serialize_struct("RequestOld", 2)?;
-//         s.serialize_field("CqcHdr", &self.cqc_hdr)?;
-//         if self.req_cmd.is_some() {
-//             s.serialize_field("ReqCmd", self.req_cmd.as_ref().unwrap())?;
-//         }
-//         s.end()
-//     }
-// }
 
 impl Serialize for Request {
     #[inline]
@@ -373,7 +379,7 @@ impl Serialize for Request {
             match body {
                 RequestBody::Cmd(b) => s.serialize_field("body", b)?,
                 RequestBody::FactCmd(b) => s.serialize_field("body", b)?,
-                _ => () // TODO: Mix
+                RequestBody::Mix(b) => s.serialize_field("body", b)?
             };
         }
         s.end()
@@ -392,7 +398,7 @@ impl Serialize for TypedRequest {
             match body {
                 RequestBody::Cmd(b) => s.serialize_field("body", b)?,
                 RequestBody::FactCmd(b) => s.serialize_field("body", b)?,
-                _ => () // TODO: Mix
+                RequestBody::Mix(_) => panic!("Typed Request should not be of type Mix")
             };
         }
         s.end()
@@ -431,129 +437,41 @@ impl Serialize for ReqFactCmd {
     }
 }
 
+impl Serialize for MixBody {
+    #[inline]
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        let mut s = serializer.serialize_struct("MixBody", self.reqs.len())?;
+        for req in &self.reqs {
+            s.serialize_field("req", req)?;
+        }
+        s.end()
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Request deserialisation.
 // ----------------------------------------------------------------------------
 
-// impl<'de> Deserialize<'de> for RequestOld {
-//     #[inline]
-//     fn deserialize<D>(deserializer: D) -> Result<RequestOld, D::Error>
-//     where
-//         D: Deserializer<'de>,
-//     {
-//         const FIELDS: &'static [&'static str] =
-//             &["CqcHdr", "FactoryHdr", "CmdHdr", "XtraHdr"];
-//         deserializer.deserialize_struct("RequestOld", FIELDS, RequestOldVisitor)
-//     }
-// }
-
-// struct RequestOldVisitor;
-
-// impl<'de> Visitor<'de> for RequestOldVisitor {
-//     type Value = RequestOld;
-
-//     #[inline]
-//     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-//         formatter.write_str("a CQC request packet")
-//     }
-
-//     #[inline]
-//     fn visit_seq<V>(self, mut seq: V) -> Result<RequestOld, V::Error>
-//     where
-//         V: SeqAccess<'de>,
-//     {
-//         let cqc_hdr: CqcHdr = de_hdr!(seq);
-//         let (msg_type, length) = (cqc_hdr.msg_type, cqc_hdr.length);
-
-//         if length == 0 {
-//             return Ok(RequestOld {
-//                 cqc_hdr,
-//                 req_cmd: None,
-//             });
-//         }
-
-//         let req_cmd = match msg_type {
-//             MsgType::Tp(Tp::Hello) => {
-//                 return Err(de::Error::invalid_type(
-//                     de::Unexpected::Other(
-//                         "Hello message should not have a message body",
-//                     ),
-//                     &self,
-//                 ));
-//             }
-//             MsgType::Tp(Tp::GetTime) | MsgType::Tp(Tp::Command) => {
-//                 de_check_len!("CmdHdr", length, CmdHdr::hdr_len());
-//                 let cmd_hdr: CmdHdr = de_hdr!(seq);
-
-//                 let length = length - CmdHdr::hdr_len();
-//                 let xtra_hdr = match cmd_hdr.instr {
-//                     Cmd::RotX | Cmd::RotY | Cmd::RotZ => {
-//                         de_check_len!("RotHdr", length, RotHdr::hdr_len());
-//                         XtraHdr::Rot(de_hdr!(seq))
-//                     }
-
-//                     Cmd::Cnot | Cmd::Cphase => {
-//                         de_check_len!("QubitHdr", length, QubitHdr::hdr_len());
-//                         XtraHdr::Qubit(de_hdr!(seq))
-//                     }
-
-//                     Cmd::Send | Cmd::Epr => {
-//                         de_check_len!("CommHdr", length, CommHdr::hdr_len());
-//                         XtraHdr::Comm(de_hdr!(seq))
-//                     }
-
-//                     _ => XtraHdr::None,
-//                 };
-
-//                 Some(ReqCmd { cmd_hdr, xtra_hdr })
-//             }
-
-//             MsgType::Tp(Tp::InfTime)
-//             | MsgType::Tp(Tp::Mix)
-//             | MsgType::Tp(Tp::If) => {
-//                 return Err(de::Error::invalid_type(
-//                     de::Unexpected::Other(
-//                         &vec![
-//                             "Deserialise not yet supported for:".to_string(),
-//                             msg_type.to_string(),
-//                         ]
-//                         .join(" "),
-//                     ),
-//                     &self,
-//                 ));
-//             }
-
-//             _ => {
-//                 return Err(de::Error::invalid_type(
-//                     de::Unexpected::Other(
-//                         &vec![
-//                             "Unexpected message type:".to_string(),
-//                             msg_type.to_string(),
-//                         ]
-//                         .join(" "),
-//                     ),
-//                     &self,
-//                 ));
-//             }
-//         };
-
-//         Ok(RequestOld { cqc_hdr, req_cmd })
-//     }
-// }
-
-
-
-impl<'de> Deserialize<'de> for Request {
-    #[inline]
-    fn deserialize<D>(deserializer: D) -> Result<Request, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        const FIELDS: &'static [&'static str] =
-            &["cqc_hdr", "body"];
-        deserializer.deserialize_struct("Request", FIELDS, RequestVisitor)
+macro_rules! impl_deserialize {
+    ($name: ident, $visitor_name: ident, $num_fields: expr) => {
+        impl<'de> Deserialize<'de> for $name {
+            #[inline]
+            fn deserialize<D>(deserializer: D) -> Result<$name, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                // only the number of fields matters, not their values
+                const FIELDS: &'static [&'static str] = &[""; $num_fields];
+                deserializer.deserialize_struct("$name", FIELDS, $visitor_name)
+            }
+        }
     }
 }
+
+impl_deserialize!(Request, RequestVisitor, 2);
 
 struct RequestVisitor;
 
@@ -570,6 +488,9 @@ impl<'de> Visitor<'de> for RequestVisitor {
     where
         V: SeqAccess<'de>,
     {
+        // println!("request visit_seq size hint: {:x?}", seq.size_hint());
+        // let next_word: u16 = de_hdr!(seq);
+        // println!("next word: {:x?}", next_word);
         let cqc_hdr: CqcHdr = de_hdr!(seq);
         let (msg_type, length) = (cqc_hdr.msg_type, cqc_hdr.length);
 
@@ -590,21 +511,17 @@ impl<'de> Visitor<'de> for RequestVisitor {
                 ));
             },
             MsgType::Tp(Tp::Factory) => {
+                de_check_len!("FactoryHdr", length, FactoryHdr::hdr_len());
                 let fact_cmd: ReqFactCmd = de_hdr!(seq);
                 let body = Some(RequestBody::FactCmd(fact_cmd));
                 return Ok(Request { cqc_hdr, body } )
             },
             MsgType::Tp(Tp::Command) | MsgType::Tp(Tp::GetTime) => {
+                de_check_len!("CmdHdr", length, CmdHdr::hdr_len());
                 let cmd: ReqCmd = de_hdr!(seq);
                 let body = Some(RequestBody::Cmd(cmd));
                 return Ok(Request { cqc_hdr, body } )
             },
-            MsgType::Tp(Tp::Mix) => {
-                let req: TypedRequest = de_hdr!(seq);
-                let mix_body = MixBody { reqs: vec![req] };
-                let body = Some(RequestBody::Mix(mix_body));
-                return Ok(Request { cqc_hdr, body } )
-            }
             _ => {
                 return Err(de::Error::invalid_type(
                     de::Unexpected::Other(
@@ -623,18 +540,7 @@ impl<'de> Visitor<'de> for RequestVisitor {
 }
 
 
-
-impl<'de> Deserialize<'de> for TypedRequest {
-    #[inline]
-    fn deserialize<D>(deserializer: D) -> Result<TypedRequest, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        const FIELDS: &'static [&'static str] =
-            &["type_hdr", "body"];
-        deserializer.deserialize_struct("TypedRequest", FIELDS, TypedRequestVisitor)
-    }
-}
+impl_deserialize!(TypedRequest, TypedRequestVisitor, 2);
 
 struct TypedRequestVisitor;
 
@@ -697,17 +603,7 @@ impl<'de> Visitor<'de> for TypedRequestVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for ReqCmd {
-    #[inline]
-    fn deserialize<D>(deserializer: D) -> Result<ReqCmd, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        const FIELDS: &'static [&'static str] =
-            &["cqc_hdr", "body"];
-        deserializer.deserialize_struct("ReqCmd", FIELDS, ReqCmdVisitor)
-    }
-}
+impl_deserialize!(ReqCmd, ReqCmdVisitor, 2);
 
 struct ReqCmdVisitor;
 
@@ -728,38 +624,28 @@ impl<'de> Visitor<'de> for ReqCmdVisitor {
         let instr = cmd_hdr.instr;
 
 
-        match instr {
-            Cmd::I => {
-                return Ok(ReqCmd { cmd_hdr, xtra_hdr: XtraHdr::None } )
-            },
-            _ => {
-                return Err(de::Error::invalid_type(
-                    de::Unexpected::Other(
-                        &vec![
-                            "Deserialise not yet supported for:".to_string(),
-                            format!("{:?}", instr).to_string(),
-                        ]
-                        .join(" "),
-                    ),
-                    &self,
-                ));
+        let xtra_hdr = match instr {
+            Cmd::RotX | Cmd::RotY | Cmd::RotZ => {
+                XtraHdr::Rot(de_hdr!(seq))
             }
-        }
+
+            Cmd::Cnot | Cmd::Cphase => {
+                XtraHdr::Qubit(de_hdr!(seq))
+            }
+
+            Cmd::Send | Cmd::Epr => {
+                XtraHdr::Comm(de_hdr!(seq))
+            }
+
+            _ => XtraHdr::None,
+        };
+
+        Ok(ReqCmd { cmd_hdr, xtra_hdr })
 
     }
 }
 
-impl<'de> Deserialize<'de> for ReqFactCmd {
-    #[inline]
-    fn deserialize<D>(deserializer: D) -> Result<ReqFactCmd, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        const FIELDS: &'static [&'static str] =
-            &["cqc_hdr", "body"];
-        deserializer.deserialize_struct("ReqFactCmd", FIELDS, ReqFactCmdVisitor)
-    }
-}
+impl_deserialize!(ReqFactCmd, ReqFactCmdVisitor, 2);
 
 struct ReqFactCmdVisitor;
 
