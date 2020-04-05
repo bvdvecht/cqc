@@ -80,12 +80,14 @@ impl Client {
     /// Build a measurement command request.
     #[inline]
     pub fn cmd_measure(&self, qubit_id: u16, options: CmdOpt) -> Request {
-        self.command(self.build_req_cmd(qubit_id, Cmd::Measure, options, XtraHdr::None))
+        let assign = XtraHdr::Assign(AssignHdr { ref_id: 0 });
+        self.command(self.build_req_cmd(qubit_id, Cmd::Measure, options, assign))
     }
     /// Build an in-place measurement command request.
     #[inline]
     pub fn cmd_measure_inplace(&self, qubit_id: u16, options: CmdOpt) -> Request {
-        self.command(self.build_req_cmd(qubit_id, Cmd::MeasureInplace, options, XtraHdr::None))
+        let assign = XtraHdr::Assign(AssignHdr { ref_id: 0 });
+        self.command(self.build_req_cmd(qubit_id, Cmd::MeasureInplace, options, assign))
     }
     /// Build a reset command request.
     #[inline]

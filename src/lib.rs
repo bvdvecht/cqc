@@ -240,6 +240,7 @@ pub enum XtraHdr {
     Rot(RotHdr),
     Qubit(QubitHdr),
     Comm(CommHdr),
+    Assign(AssignHdr),
     None,
 }
 
@@ -249,6 +250,7 @@ impl XtraHdr {
             XtraHdr::Rot(_) => RotHdr::hdr_len(),
             XtraHdr::Qubit(_) => QubitHdr::hdr_len(),
             XtraHdr::Comm(_) => CommHdr::hdr_len(),
+            XtraHdr::Assign(_) => AssignHdr::hdr_len(),
             XtraHdr::None => 0,
         }
     }
@@ -307,6 +309,7 @@ impl Serialize for ReqCmd {
             XtraHdr::Rot(ref h) => s.serialize_field("RotHdr", h)?,
             XtraHdr::Qubit(ref h) => s.serialize_field("QubtiHdr", h)?,
             XtraHdr::Comm(ref h) => s.serialize_field("CommHdr", h)?,
+            XtraHdr::Assign(ref h) => s.serialize_field("AssignHdr", h)?,
             XtraHdr::None => (),
         };
         s.end()
